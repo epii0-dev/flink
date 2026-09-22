@@ -40,10 +40,12 @@ import org.slf4j.LoggerFactory;
 import javax.annotation.Nullable;
 
 import java.io.IOException;
+import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Objects;
 
+import static java.lang.String.format;
 import static org.apache.flink.util.Preconditions.checkNotNull;
 
 /**
@@ -58,6 +60,13 @@ public abstract class AbstractJsonDeserializationSchema implements Deserializati
 
     private static final Logger LOG =
             LoggerFactory.getLogger(AbstractJsonDeserializationSchema.class);
+
+    /**
+     * Maximum number of leading input bytes included in parse-failure diagnostics. Keeping the
+     * preview bounded prevents arbitrarily large messages from being attached to exception messages
+     * and log events.
+     */
+    private static final int MESSAGE_PREVIEW_LIMIT_BYTES = 2048;
 
     /** Flag indicating whether to fail if a field is missing. */
     protected final boolean failOnMissingField;
@@ -163,6 +172,22 @@ public abstract class AbstractJsonDeserializationSchema implements Deserializati
     }
 
     /**
+     * Handles a failure that occurred while parsing or converting the input message. The failure is
+     * wrapped in an {@link IOException} and rethrown, or logged at debug level and ignored when
+     * {@code ignoreParseErrors} is enabled.
+     *
+     * @param message the original JSON message that failed to parse
+     * @param t the throwable that was caught
+     */
+    protected void handleParseError(byte[] message, Throwable t) throws IOException {
+        if (!ignoreParseErrors) {
+            throw new IOException(
+                    format("Failed to deserialize JSON '%s'.", createMessagePreview(message)), t);
+        }
+        logParseErrorIfDebugEnabled(message, t);
+    }
+
+    /**
      * Logs a debug message for parsing errors only when debug logs are enabled.
      *
      * @param message the original JSON message that failed to parse
@@ -170,7 +195,22 @@ public abstract class AbstractJsonDeserializationSchema implements Deserializati
      */
     protected void logParseErrorIfDebugEnabled(byte[] message, Throwable t) {
         if (LOG.isDebugEnabled()) {
-            LOG.debug("Failed to deserialize JSON '{}'.", new String(message), t);
+            LOG.debug("Failed to deserialize JSON '{}'.", createMessagePreview(message), t);
         }
+    }
+
+    /**
+     * Builds a bounded preview of a raw input message for failure diagnostics. The byte range is
+     * limited to {@link #MESSAGE_PREVIEW_LIMIT_BYTES} before decoding, so the full input is never
+     * materialized as a {@link String} for large messages. Truncated input is annotated with the
+     * original byte length.
+     */
+    protected static String createMessagePreview(byte[] message) {
+        int previewLength = Math.min(message.length, MESSAGE_PREVIEW_LIMIT_BYTES);
+        String preview = new String(message, 0, previewLength, StandardCharsets.UTF_8);
+        if (previewLength < message.length) {
+            return format("%s... (truncated, %d bytes total)", preview, message.length);
+        }
+        return preview;
     }
 }

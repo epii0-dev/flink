@@ -32,7 +32,6 @@ import javax.annotation.Nullable;
 
 import java.io.IOException;
 
-import static java.lang.String.format;
 import static org.apache.flink.util.Preconditions.checkNotNull;
 
 /**
@@ -69,36 +68,39 @@ public class JsonRowDataDeserializationSchema extends AbstractJsonDeserializatio
         if (message == null) {
             return;
         }
+        final JsonNode root;
         try {
-            final JsonNode root = deserializeToJsonNode(message);
-            if (root != null && root.isArray()) {
-                ArrayNode arrayNode = (ArrayNode) root;
-                for (int i = 0; i < arrayNode.size(); i++) {
-                    try {
-                        RowData result = convertToRowData(arrayNode.get(i));
-                        if (result != null) {
-                            out.collect(result);
-                        }
-                    } catch (Throwable t) {
-                        if (!ignoreParseErrors) {
-                            // will be caught by outer try-catch
-                            throw t;
-                        }
-                        logParseErrorIfDebugEnabled(message, t);
-                    }
+            root = deserializeToJsonNode(message);
+        } catch (Throwable t) {
+            handleParseError(message, t);
+            return;
+        }
+        if (root != null && root.isArray()) {
+            ArrayNode arrayNode = (ArrayNode) root;
+            for (int i = 0; i < arrayNode.size(); i++) {
+                final RowData result;
+                try {
+                    result = convertToRowData(arrayNode.get(i));
+                } catch (Throwable t) {
+                    handleParseError(message, t);
+                    continue;
                 }
-            } else {
-                RowData result = convertToRowData(root);
                 if (result != null) {
+                    // downstream Collector failures are not parse errors and propagate unchanged
                     out.collect(result);
                 }
             }
-        } catch (Throwable t) {
-            if (!ignoreParseErrors) {
-                throw new IOException(
-                        format("Failed to deserialize JSON '%s'.", new String(message)), t);
+        } else {
+            final RowData result;
+            try {
+                result = convertToRowData(root);
+            } catch (Throwable t) {
+                handleParseError(message, t);
+                return;
             }
-            logParseErrorIfDebugEnabled(message, t);
+            if (result != null) {
+                out.collect(result);
+            }
         }
     }
 

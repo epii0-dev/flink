@@ -68,9 +68,11 @@ import static org.slf4j.event.Level.DEBUG;
  * <ul>
  *   <li>Exceptions thrown by {@link Collector#collect} are downstream failures, not parse errors.
  *       They must propagate unchanged and must never be swallowed by {@code ignore-parse-errors}.
- *   <li>Diagnostics for genuine parse failures must be bounded and must not embed the full raw
- *       input in the exception message, in the messages of causes/suppressed exceptions, in the
- *       stringified stack trace, in the serialized throwable, or in the debug log.
+ *   <li>For genuine parse failures, the sampled thrown-exception graph must have bounded
+ *       diagnostics: the raw input must not be embedded in the outer or cause/suppressed messages,
+ *       the stringified stack trace, the serialized throwable, or the debug log. This is validated
+ *       for a top-level-token input; boundedness of field-level conversion causes is a separate
+ *       deferred defect.
  * </ul>
  */
 @ExtendWith(ParameterizedTestExtension.class)
@@ -81,6 +83,8 @@ public class JsonDeserializationErrorBoundaryTest {
     private static final int MAX_DIAGNOSTIC_LENGTH = 4096;
 
     private static final int MAX_SERIALIZED_THROWABLE_LENGTH = 64 * 1024;
+
+    private static final int EXPECTED_PREVIEW_LIMIT_BYTES = 2048;
 
     private static final RowType ROW_TYPE =
             (RowType) ROW(FIELD("id", INT()), FIELD("name", STRING())).getLogicalType();
@@ -176,6 +180,24 @@ public class JsonDeserializationErrorBoundaryTest {
     }
 
     /**
+     * A downstream {@link Collector} throwing an {@link Error} must also propagate unchanged; it is
+     * not reclassified as a parse failure either.
+     */
+    @TestTemplate
+    void testCollectorErrorPropagates() {
+        DeserializationSchema<RowData> schema = createSchema(true);
+        AssertionError downstream = new AssertionError("simulated downstream error");
+
+        assertThatThrownBy(
+                        () ->
+                                schema.deserialize(
+                                        "{\"id\":1,\"name\":\"a\"}"
+                                                .getBytes(StandardCharsets.UTF_8),
+                                        failingCollector(downstream)))
+                .isSameAs(downstream);
+    }
+
+    /**
      * Genuine parse failures keep the existing semantics: {@code ignore-parse-errors=false} fails
      * with an {@link IOException}; {@code ignore-parse-errors=true} skips the record.
      */
@@ -211,19 +233,80 @@ public class JsonDeserializationErrorBoundaryTest {
                 .isInstanceOf(IOException.class)
                 .satisfies(
                         t -> {
-                            // record the real diagnostic sizes in the surefire output before
-                            // any bound assertion runs
-                            System.err.printf(
-                                    "DIAG-SIZE isJsonParser=%s serializedBytes=%d stringifiedChars=%d%n",
-                                    isJsonParser,
-                                    serialize(t).length,
-                                    ExceptionUtils.stringifyException(t).length());
-                            assertBoundedThrowableMessages(t);
-                            assertThat(ExceptionUtils.stringifyException(t))
-                                    .doesNotContain(TAIL_MARKER);
-                            assertThat(serialize(t).length)
-                                    .isLessThan(MAX_SERIALIZED_THROWABLE_LENGTH);
+                            assertBoundedDiagnostics("rootParse", t);
+                            assertThat(t.getMessage())
+                                    .contains(
+                                            new String(
+                                                            corrupt,
+                                                            0,
+                                                            EXPECTED_PREVIEW_LIMIT_BYTES,
+                                                            StandardCharsets.UTF_8)
+                                                    + "... (truncated, "
+                                                    + corrupt.length
+                                                    + " bytes total)");
                         });
+    }
+
+    /**
+     * The preview bound applies to raw bytes before UTF-8 decoding: a multi-byte character
+     * straddling the byte limit is cut mid-sequence and decodes as the replacement character, which
+     * distinguishes byte-bounded decoding from decoding first and truncating characters.
+     */
+    @TestTemplate
+    void testParseErrorPreviewBoundsBytesBeforeDecoding() {
+        DeserializationSchema<RowData> schema = createSchema(false);
+        byte[] corrupt = multibyteBoundaryMessage();
+
+        assertThatThrownBy(
+                        () -> schema.deserialize(corrupt, new ListCollector<>(new ArrayList<>())))
+                .isInstanceOf(IOException.class)
+                .satisfies(
+                        t ->
+                                assertThat(t.getMessage())
+                                        .contains(
+                                                "!"
+                                                        + "x"
+                                                                .repeat(
+                                                                        EXPECTED_PREVIEW_LIMIT_BYTES
+                                                                                - 2)
+                                                        + "\uFFFD"
+                                                        + "... (truncated, "
+                                                        + corrupt.length
+                                                        + " bytes total)")
+                                        .doesNotContain("\u20AC"));
+    }
+
+    /**
+     * With {@code ignore-parse-errors=true}, a record whose conversion fails entirely must be
+     * skipped — the schema must not emit a {@code null} row to the downstream {@link Collector},
+     * which would fail on it (see JsonBatchFileSystemITCase#testParseError).
+     */
+    @TestTemplate
+    void testIgnoredMalformedObjectEmitsNoRow() throws Exception {
+        DeserializationSchema<RowData> schema = createSchema(true);
+
+        List<RowData> collected = new ArrayList<>();
+        schema.deserialize(
+                "{I am a wrong json.}".getBytes(StandardCharsets.UTF_8),
+                new ListCollector<>(collected));
+
+        assertThat(collected).isEmpty();
+    }
+
+    /**
+     * Control: {@code ignore-parse-errors=true} keeps the existing field-level policy — an
+     * unconvertible field becomes null and the row is still emitted. No exception, no skipped row;
+     * this behavior is intentionally preserved.
+     */
+    @TestTemplate
+    void testFieldConversionErrorYieldsNullField() throws Exception {
+        DeserializationSchema<RowData> schema = createSchema(true);
+
+        List<RowData> collected = new ArrayList<>();
+        schema.deserialize(largeFieldValueMessage("id"), new ListCollector<>(collected));
+
+        assertThat(collected).hasSize(1);
+        assertThat(collected.get(0).isNullAt(0)).isTrue();
     }
 
     /**
@@ -245,13 +328,38 @@ public class JsonDeserializationErrorBoundaryTest {
                 .as("expected at least one parse-failure debug log event to be captured")
                 .isNotEmpty();
         for (LogEvent event : events) {
-            assertThat(event.getMessage().getFormattedMessage()).doesNotContain(TAIL_MARKER);
+            assertThat(event.getMessage().getFormattedMessage())
+                    .doesNotContain(TAIL_MARKER)
+                    .contains(
+                            new String(
+                                            corrupt,
+                                            0,
+                                            EXPECTED_PREVIEW_LIMIT_BYTES,
+                                            StandardCharsets.UTF_8)
+                                    + "... (truncated, "
+                                    + corrupt.length
+                                    + " bytes total)");
             assertThat(event.getMessage().getFormattedMessage().length())
                     .isLessThan(MAX_DIAGNOSTIC_LENGTH);
             if (event.getThrown() != null) {
                 assertBoundedThrowableMessages(event.getThrown());
             }
         }
+    }
+
+    /**
+     * A valid ~1 MiB document whose single field carries a nonnumeric string ending in the marker,
+     * so both deserializers fail during field conversion with the full value inside the conversion
+     * exception.
+     */
+    private static byte[] largeFieldValueMessage(String fieldName) {
+        StringBuilder sb = new StringBuilder((1 << 20) + 64);
+        sb.append("{\"").append(fieldName).append("\":\"");
+        while (sb.length() < (1 << 20)) {
+            sb.append("0123456789abcdef");
+        }
+        sb.append(TAIL_MARKER).append("\"}");
+        return sb.toString().getBytes(StandardCharsets.UTF_8);
     }
 
     /**
@@ -267,6 +375,41 @@ public class JsonDeserializationErrorBoundaryTest {
         }
         sb.append(TAIL_MARKER);
         return sb.toString().getBytes(StandardCharsets.UTF_8);
+    }
+
+    /**
+     * An invalid document placing the three-byte UTF-8 encoding of '€' (U+20AC) so that it
+     * straddles the 2048-byte preview boundary, padded past 1 MiB with a tail marker.
+     */
+    private static byte[] multibyteBoundaryMessage() {
+        StringBuilder sb = new StringBuilder((1 << 20) + 64);
+        sb.append('!');
+        for (int i = 0; i < EXPECTED_PREVIEW_LIMIT_BYTES - 2; i++) {
+            sb.append('x');
+        }
+        sb.append('\u20AC');
+        while (sb.length() < (1 << 20)) {
+            sb.append('y');
+        }
+        sb.append(TAIL_MARKER);
+        return sb.toString().getBytes(StandardCharsets.UTF_8);
+    }
+
+    /**
+     * Records the real diagnostic sizes in the surefire output before any bound assertion runs,
+     * then asserts the outer message, all cause/suppressed messages, the stringified stack trace,
+     * and the serialized throwable are bounded and marker-free.
+     */
+    private void assertBoundedDiagnostics(String caseName, Throwable t) {
+        System.err.printf(
+                "DIAG-SIZE isJsonParser=%s case=%s serializedBytes=%d stringifiedChars=%d%n",
+                isJsonParser,
+                caseName,
+                serialize(t).length,
+                ExceptionUtils.stringifyException(t).length());
+        assertBoundedThrowableMessages(t);
+        assertThat(ExceptionUtils.stringifyException(t)).doesNotContain(TAIL_MARKER);
+        assertThat(serialize(t).length).isLessThan(MAX_SERIALIZED_THROWABLE_LENGTH);
     }
 
     /**
@@ -303,17 +446,22 @@ public class JsonDeserializationErrorBoundaryTest {
     }
 
     private DeserializationSchema<RowData> createSchema(boolean ignoreParseErrors) {
+        return createSchema(ROW_TYPE, ignoreParseErrors);
+    }
+
+    private DeserializationSchema<RowData> createSchema(
+            RowType rowType, boolean ignoreParseErrors) {
         DeserializationSchema<RowData> schema =
                 isJsonParser
                         ? new JsonParserRowDataDeserializationSchema(
-                                ROW_TYPE,
-                                InternalTypeInfo.of(ROW_TYPE),
+                                rowType,
+                                InternalTypeInfo.of(rowType),
                                 false,
                                 ignoreParseErrors,
                                 TimestampFormat.SQL)
                         : new JsonRowDataDeserializationSchema(
-                                ROW_TYPE,
-                                InternalTypeInfo.of(ROW_TYPE),
+                                rowType,
+                                InternalTypeInfo.of(rowType),
                                 false,
                                 ignoreParseErrors,
                                 TimestampFormat.SQL);
@@ -321,11 +469,11 @@ public class JsonDeserializationErrorBoundaryTest {
         return schema;
     }
 
-    private static Collector<RowData> failingCollector(RuntimeException failure) {
+    private static Collector<RowData> failingCollector(Throwable failure) {
         return new Collector<RowData>() {
             @Override
             public void collect(RowData record) {
-                throw failure;
+                ExceptionUtils.rethrow(failure);
             }
 
             @Override

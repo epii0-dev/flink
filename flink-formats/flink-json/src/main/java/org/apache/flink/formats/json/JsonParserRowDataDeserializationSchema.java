@@ -24,6 +24,7 @@ import org.apache.flink.formats.common.TimestampFormat;
 import org.apache.flink.table.data.RowData;
 import org.apache.flink.table.types.logical.RowType;
 import org.apache.flink.util.Collector;
+import org.apache.flink.util.ExceptionUtils;
 
 import org.apache.flink.shaded.jackson2.com.fasterxml.jackson.core.JsonParser;
 import org.apache.flink.shaded.jackson2.com.fasterxml.jackson.core.JsonToken;
@@ -33,7 +34,6 @@ import javax.annotation.Nullable;
 
 import java.io.IOException;
 
-import static java.lang.String.format;
 import static org.apache.flink.util.Preconditions.checkNotNull;
 
 /**
@@ -95,22 +95,64 @@ public class JsonParserRowDataDeserializationSchema extends AbstractJsonDeserial
             } else {
                 processObject(root, out);
             }
+        } catch (CollectorException e) {
+            // downstream Collector failures are not parse errors and propagate unchanged
+            propagateCollectorException(e);
         } catch (Throwable t) {
-            if (!ignoreParseErrors) {
-                throw new IOException(
-                        format("Failed to deserialize JSON '%s'.", new String(message)), t);
-            }
-            logParseErrorIfDebugEnabled(message, t);
+            handleParseError(message, t);
         }
     }
 
     private void processArray(JsonParser root, Collector<RowData> out) throws IOException {
         while (root.nextToken() != JsonToken.END_ARRAY) {
-            out.collect((RowData) runtimeConverter.convert(root));
+            collect(out, (RowData) runtimeConverter.convert(root));
         }
     }
 
     private void processObject(JsonParser root, Collector<RowData> out) throws IOException {
-        out.collect((RowData) runtimeConverter.convert(root));
+        collect(out, (RowData) runtimeConverter.convert(root));
+    }
+
+    /**
+     * Emits a converted row. A {@code null} row signals an ignored parse failure inside the
+     * converter and is not emitted downstream, matching the JsonNode schema's {@code result !=
+     * null} policy. Exceptions thrown by the downstream {@link Collector} are wrapped in a {@link
+     * CollectorException} so that they are not misclassified as parse errors by the catch block in
+     * {@link #deserialize(byte[], Collector)}.
+     */
+    private static void collect(Collector<RowData> out, @Nullable RowData row) {
+        if (row == null) {
+            return;
+        }
+        try {
+            out.collect(row);
+        } catch (Throwable t) {
+            throw new CollectorException(t);
+        }
+    }
+
+    /**
+     * Rethrows the downstream failure carried by a {@link CollectorException}. Errors, runtime
+     * exceptions and {@link IOException}s propagate with their identity preserved.
+     */
+    private static void propagateCollectorException(CollectorException e) throws IOException {
+        Throwable cause = e.getCause();
+        for (Throwable suppressed : e.getSuppressed()) {
+            cause.addSuppressed(suppressed);
+        }
+        if (cause instanceof IOException) {
+            throw (IOException) cause;
+        }
+        ExceptionUtils.rethrow(cause);
+    }
+
+    /**
+     * Marker exception carrying a downstream {@link Collector} failure across the parse-error catch
+     * block. The original failure is rethrown unchanged.
+     */
+    private static class CollectorException extends RuntimeException {
+        private CollectorException(Throwable cause) {
+            super(cause);
+        }
     }
 }
