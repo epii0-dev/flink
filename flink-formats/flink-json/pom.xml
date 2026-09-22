@@ -28,12 +28,51 @@ under the License.
 		<version>2.3.0</version>
 	</parent>
 
+	<groupId>org.epii0</groupId>
 	<artifactId>flink-json</artifactId>
+	<version>2.3.0-epii0.1</version>
+	<!-- The upstream module name is intentionally kept verbatim: it is interpolated
+		into the generated META-INF/NOTICE together with the ASF copyright line.
+		The derivative is identified by groupId/version, description, SCM and
+		manifest vendor entries instead of renaming ASF-copyrighted content. -->
 	<name>Flink : Formats : Json</name>
+	<description>
+		Epii0-maintained patch release of the Apache Flink 2.3.0 flink-json module
+		(Apache License 2.0). Changes versus upstream 2.3.0: exceptions thrown by the
+		downstream Collector propagate unchanged instead of being misclassified or
+		swallowed as parse errors, malformed records ignored via ignore-parse-errors
+		are not emitted to the Collector as null rows, and the raw-input preview
+		embedded in JSON parse diagnostics and debug logs is byte-bounded.
+		This is not an official Apache Flink release.
+	</description>
+	<url>https://github.com/epii0-dev/flink</url>
+
+	<scm>
+		<connection>scm:git:https://github.com/epii0-dev/flink.git</connection>
+		<developerConnection>scm:git:ssh://git@github.com/epii0-dev/flink.git</developerConnection>
+		<url>https://github.com/epii0-dev/flink</url>
+		<tag>epii0-json-2.3.0-epii0.1-rc1</tag>
+	</scm>
+
+	<developers>
+		<developer>
+			<id>epii0-dev</id>
+			<name>Epii0</name>
+			<email>331247313+epii0-dev@users.noreply.github.com</email>
+			<organization>Epii0</organization>
+			<organizationUrl>https://github.com/epii0-dev</organizationUrl>
+		</developer>
+	</developers>
 
 	<packaging>jar</packaging>
 
 	<properties>
+		<!-- Version of the official org.apache.flink artifacts this module depends on. -->
+		<flink.upstream.version>2.3.0</flink.upstream.version>
+		<!-- Match the upstream release bytecode baseline (major 55) instead of the
+			developer default 17; the upstream release profile cannot be activated here
+			because it also enables artifact signing. -->
+		<target.java.version>11</target.java.version>
 		<surefire.module.config><!--
 			chill ArraysAsListSerializer
 			-->--add-opens=java.base/java.util=ALL-UNNAMED
@@ -45,7 +84,7 @@ under the License.
 		<dependency>
 			<groupId>org.apache.flink</groupId>
 			<artifactId>flink-format-common</artifactId>
-			<version>${project.version}</version>
+			<version>${flink.upstream.version}</version>
 			<optional>${flink.markBundledAsOptional}</optional>
 		</dependency>
 
@@ -60,7 +99,7 @@ under the License.
 		<dependency>
 			<groupId>org.apache.flink</groupId>
 			<artifactId>flink-core</artifactId>
-			<version>${project.version}</version>
+			<version>${flink.upstream.version}</version>
 			<scope>provided</scope>
 		</dependency>
 
@@ -69,7 +108,7 @@ under the License.
 		<dependency>
 			<groupId>org.apache.flink</groupId>
 			<artifactId>flink-table-common</artifactId>
-			<version>${project.version}</version>
+			<version>${flink.upstream.version}</version>
 			<scope>provided</scope>
 			<optional>true</optional>
 		</dependency>
@@ -77,7 +116,7 @@ under the License.
 		<dependency>
 			<groupId>org.apache.flink</groupId>
 			<artifactId>flink-connector-files</artifactId>
-			<version>${project.version}</version>
+			<version>${flink.upstream.version}</version>
 			<scope>provided</scope>
 			<optional>true</optional>
 		</dependency>
@@ -88,7 +127,7 @@ under the License.
 		<dependency>
 			<groupId>org.apache.flink</groupId>
 			<artifactId>flink-table-common</artifactId>
-			<version>${project.version}</version>
+			<version>${flink.upstream.version}</version>
 			<scope>test</scope>
 			<type>test-jar</type>
 		</dependency>
@@ -97,7 +136,7 @@ under the License.
 		<dependency>
 			<groupId>org.apache.flink</groupId>
 			<artifactId>flink-table-planner_${scala.binary.version}</artifactId>
-			<version>${project.version}</version>
+			<version>${flink.upstream.version}</version>
 			<scope>test</scope>
 		</dependency>
 
@@ -105,13 +144,13 @@ under the License.
 		<dependency>
 			<groupId>org.apache.flink</groupId>
 			<artifactId>flink-table-api-scala-bridge_${scala.binary.version}</artifactId>
-			<version>${project.version}</version>
+			<version>${flink.upstream.version}</version>
 			<scope>test</scope>
 		</dependency>
 		<dependency>
 			<groupId>org.apache.flink</groupId>
 			<artifactId>flink-table-planner_${scala.binary.version}</artifactId>
-			<version>${project.version}</version>
+			<version>${flink.upstream.version}</version>
 			<scope>test</scope>
 			<type>test-jar</type>
 		</dependency>
@@ -119,7 +158,7 @@ under the License.
 		<dependency>
 			<groupId>org.apache.flink</groupId>
 			<artifactId>flink-connector-datagen</artifactId>
-			<version>${project.version}</version>
+			<version>${flink.upstream.version}</version>
 			<type>test-jar</type>
 			<scope>test</scope>
 		</dependency>
@@ -128,13 +167,13 @@ under the License.
 		<dependency>
 			<groupId>org.apache.flink</groupId>
 			<artifactId>flink-connector-test-utils</artifactId>
-			<version>${project.version}</version>
+			<version>${flink.upstream.version}</version>
 			<scope>test</scope>
 		</dependency>
 		<dependency>
 			<groupId>org.apache.flink</groupId>
 			<artifactId>flink-test-utils</artifactId>
-			<version>${project.version}</version>
+			<version>${flink.upstream.version}</version>
 			<scope>test</scope>
 		</dependency>
 
@@ -150,12 +189,97 @@ under the License.
 		<dependency>
 			<groupId>org.apache.flink</groupId>
 			<artifactId>flink-architecture-tests-test</artifactId>
+			<version>${flink.upstream.version}</version>
 			<scope>test</scope>
 		</dependency>
 	</dependencies>
 
+	<dependencyManagement>
+		<dependencies>
+			<!-- The root dependencyManagement expresses these two versions as
+				${project.version}, which resolves to this module's own epii0 version
+				and would break resolution. Pin them to the official upstream release.
+				All other org.apache.flink artifacts are either pinned directly below
+				or carry their own versions transitively. -->
+			<dependency>
+				<groupId>org.apache.flink</groupId>
+				<artifactId>flink-test-utils-junit</artifactId>
+				<version>${flink.upstream.version}</version>
+				<scope>test</scope>
+			</dependency>
+			<dependency>
+				<groupId>org.apache.flink</groupId>
+				<artifactId>flink-architecture-tests-base</artifactId>
+				<version>${flink.upstream.version}</version>
+				<scope>test</scope>
+			</dependency>
+		</dependencies>
+	</dependencyManagement>
+
 	<build>
 		<plugins>
+			<!-- The jar manifest defaults derive vendor from the ASF parent
+				organization; identify the actual maintainer of this derivative
+				instead, without touching the ASF-copyrighted NOTICE content. -->
+			<plugin>
+				<groupId>org.apache.maven.plugins</groupId>
+				<artifactId>maven-jar-plugin</artifactId>
+				<configuration>
+					<archive>
+						<manifestEntries>
+							<Implementation-Vendor>Epii0</Implementation-Vendor>
+							<Implementation-Vendor-Id>org.epii0</Implementation-Vendor-Id>
+						</manifestEntries>
+					</archive>
+				</configuration>
+			</plugin>
+			<!-- Pin the japicmp plugin's own flink-annotations helper to the official
+				release; the inherited ${project.version} would resolve to the epii0
+				version. The compatibility baseline stays the official 2.2.0 artifact. -->
+			<plugin>
+				<groupId>com.github.siom79.japicmp</groupId>
+				<artifactId>japicmp-maven-plugin</artifactId>
+				<configuration>
+					<dependencies combine.self="override">
+						<dependency>
+							<groupId>org.apache.flink</groupId>
+							<artifactId>flink-annotations</artifactId>
+							<version>${flink.upstream.version}</version>
+						</dependency>
+					</dependencies>
+				</configuration>
+			</plugin>
+			<!-- Attach sources and javadoc like the upstream docs-and-source profile,
+				but unconditionally so every build of this release module produces the
+				full Central artifact set. -->
+			<plugin>
+				<groupId>org.apache.maven.plugins</groupId>
+				<artifactId>maven-source-plugin</artifactId>
+				<version>3.2.1</version>
+				<executions>
+					<execution>
+						<id>attach-sources</id>
+						<goals>
+							<goal>jar-no-fork</goal>
+						</goals>
+					</execution>
+				</executions>
+			</plugin>
+			<plugin>
+				<groupId>org.apache.maven.plugins</groupId>
+				<artifactId>maven-javadoc-plugin</artifactId>
+				<configuration>
+					<quiet>true</quiet>
+				</configuration>
+				<executions>
+					<execution>
+						<id>attach-javadocs</id>
+						<goals>
+							<goal>jar</goal>
+						</goals>
+					</execution>
+				</executions>
+			</plugin>
 			<plugin>
 				<groupId>org.apache.maven.plugins</groupId>
 				<artifactId>maven-shade-plugin</artifactId>
@@ -178,5 +302,46 @@ under the License.
 			</plugin>
 		</plugins>
 	</build>
+
+	<profiles>
+		<!-- Manual Central publication only: activated explicitly by the release
+			coordinator for the signed deploy step; unsigned preparation builds do
+			not activate it. -->
+		<profile>
+			<id>epii0-central-release</id>
+			<build>
+				<plugins>
+					<plugin>
+						<groupId>org.apache.maven.plugins</groupId>
+						<artifactId>maven-gpg-plugin</artifactId>
+						<version>3.2.8</version>
+						<configuration>
+							<bestPractices>true</bestPractices>
+						</configuration>
+						<executions>
+							<execution>
+								<id>sign-artifacts</id>
+								<phase>verify</phase>
+								<goals>
+									<goal>sign</goal>
+								</goals>
+							</execution>
+						</executions>
+					</plugin>
+					<plugin>
+						<groupId>org.sonatype.central</groupId>
+						<artifactId>central-publishing-maven-plugin</artifactId>
+						<version>0.11.0</version>
+						<extensions>true</extensions>
+						<configuration>
+							<publishingServerId>central</publishingServerId>
+							<autoPublish>false</autoPublish>
+							<waitUntil>validated</waitUntil>
+						</configuration>
+					</plugin>
+				</plugins>
+			</build>
+		</profile>
+	</profiles>
 
 </project>
