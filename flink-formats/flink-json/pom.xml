@@ -51,7 +51,7 @@ under the License.
 		<connection>scm:git:https://github.com/epii0-dev/flink.git</connection>
 		<developerConnection>scm:git:ssh://git@github.com/epii0-dev/flink.git</developerConnection>
 		<url>https://github.com/epii0-dev/flink</url>
-		<tag>epii0-json-2.3.0-epii0.1-rc1</tag>
+		<tag>epii0-json-2.3.0-epii0.1-rc2</tag>
 	</scm>
 
 	<developers>
@@ -220,13 +220,17 @@ under the License.
 		<plugins>
 			<!-- The jar manifest defaults derive vendor from the ASF parent
 				organization; identify the actual maintainer of this derivative
-				instead, without touching the ASF-copyrighted NOTICE content. -->
+				instead, without touching the ASF-copyrighted NOTICE content.
+				Built-By is overridden explicitly: the archiver default leaks the
+				build machine's user.name, which must not appear in the published
+				artifact. -->
 			<plugin>
 				<groupId>org.apache.maven.plugins</groupId>
 				<artifactId>maven-jar-plugin</artifactId>
 				<configuration>
 					<archive>
 						<manifestEntries>
+							<Built-By>Epii0</Built-By>
 							<Implementation-Vendor>Epii0</Implementation-Vendor>
 							<Implementation-Vendor-Id>org.epii0</Implementation-Vendor-Id>
 						</manifestEntries>
